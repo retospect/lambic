@@ -216,7 +216,7 @@ class McpClientPool:
     def tool_status(self) -> list[dict[str, Any]]:
         """Get status of all tools for display."""
         rows = []
-        for name, tool in sorted(self._tools.items()):
+        for name, tool in self._tools.items():
             conn = self._connections.get(tool.server_name)
             rows.append(
                 {
