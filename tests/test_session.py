@@ -67,8 +67,9 @@ class TestCommands:
     def test_status(self):
         result = self.session._handle_command("/status")
         assert "ollama/qwen3.5:9b" in result
-        assert "Think:" in result
-        assert "Messages:" in result
+        assert "think: on" in result
+        assert "messages" in result
+        assert "autocontinue:" in result
 
     def test_clear(self):
         self.session.messages.append({"role": "user", "content": "hi"})

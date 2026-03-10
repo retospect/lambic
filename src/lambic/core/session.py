@@ -388,18 +388,22 @@ class ChatSession:
             return full
 
         elif verb == "/status":
+            think = "on" if self.config.llm.think else "off"
+            ac = "on" if self.autocontinue else "off"
             lines = [
-                f"Model: {self.config.llm.spec}",
-                f"Think: {'on' if self.config.llm.think else 'off'}",
-                f"Max tokens: {self.config.llm.max_tokens}",
-                f"Autocontinue: {'on' if self.autocontinue else 'off'}",
-                f"Messages: {len(self.messages)}",
-                f"Tools: {len(self.mcp.enabled_tool_schemas())} enabled",
+                f"  ● LLM: {self.config.llm.spec} (think: {think})",
             ]
             for name, conn in self.mcp.connections.items():
-                status_icon = "●" if conn.status == "connected" else "○"
+                icon = "●" if conn.status == "connected" else "○"
                 err = f" ({conn.error})" if conn.error else ""
-                lines.append(f"  {status_icon} {name}: {conn.status}{err}")
+                lines.append(f"  {icon} {name}: {conn.status}{err}")
+            n_tools = len(self.mcp.enabled_tool_schemas())
+            n_msgs = len(self.messages)
+            lines.append(
+                f"  {n_tools} tools, {n_msgs} messages, "
+                f"max_tokens: {self.config.llm.max_tokens}, "
+                f"autocontinue: {ac}"
+            )
             return "\n".join(lines)
 
         elif verb == "/clear":
