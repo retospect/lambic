@@ -342,14 +342,24 @@ class ChatSession:
                         lines.append(f"      {desc}")
                 return "\n".join(lines)
             action = parts[1].lower()
-            pattern = parts[2] if len(parts) > 2 else "*"
-            if action == "off":
-                affected = self.mcp.set_tools_enabled(pattern, False)
-                return f"Disabled {len(affected)} tool(s): {', '.join(affected)}"
-            elif action == "on":
-                affected = self.mcp.set_tools_enabled(pattern, True)
-                return f"Enabled {len(affected)} tool(s): {', '.join(affected)}"
-            return "Usage: /tools [on|off] [pattern]"
+            if action in ("on", "off"):
+                pattern = parts[2] if len(parts) > 2 else "*"
+                enabled = action == "on"
+                affected = self.mcp.set_tools_enabled(pattern, enabled)
+                verb = "Enabled" if enabled else "Disabled"
+                return f"{verb} {len(affected)} tool(s): {', '.join(affected)}"
+            # /tools <name> — show full details for a specific tool
+            rows = self.mcp.tool_status()
+            match = [r for r in rows if r["name"] == action]
+            if not match:
+                # Try partial match
+                match = [r for r in rows if action in r["name"]]
+            if match:
+                r = match[0]
+                sig = _build_tool_signature(r["name"], r.get("input_schema", {}))
+                desc = r.get("description") or "(no description)"
+                return f"{sig}\n\n{desc}"
+            return "Usage: /tools [on|off|<name>] [pattern]"
 
         elif verb == "/expand":
             if len(parts) < 2:
