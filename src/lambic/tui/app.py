@@ -154,9 +154,13 @@ class Shell:
                             HTML("<b><ansigreen>› </ansigreen></b>")
                         ),
                     )
-                except (EOFError, KeyboardInterrupt):
-                    # Ctrl-D or Ctrl-C at prompt → exit
+                except EOFError:
                     break
+                except KeyboardInterrupt:
+                    self.console.print(
+                        "\n[dim]  /quit to exit[/dim]"
+                    )
+                    continue
 
                 user_input = user_input.strip()
                 if not user_input:
