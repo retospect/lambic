@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+import weakref
 from typing import Any
 
 from prompt_toolkit import PromptSession
@@ -49,6 +50,18 @@ _SLASH_SUBOPTIONS: dict[str, list[str]] = {
 class _SlashCompleter(Completer):
     """Tab-complete /commands and their subcommand options."""
 
+    def __init__(self, session_ref: callable = None):
+        self._session_ref = session_ref
+
+    def _tool_names(self) -> list[str]:
+        """Get registered tool names from the live session."""
+        if self._session_ref is None:
+            return []
+        session = self._session_ref()
+        if session is None:
+            return []
+        return list(session.mcp._tools.keys())
+
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor.lstrip()
         if not text.startswith("/"):
@@ -64,10 +77,12 @@ class _SlashCompleter(Completer):
                         display_meta=desc,
                     )
         else:
-            # Second word — complete subcommand options
+            # Second word — complete subcommand options + tool names
             cmd, _, rest = text.partition(" ")
             word = rest.lstrip()
-            options = _SLASH_SUBOPTIONS.get(cmd, [])
+            options = list(_SLASH_SUBOPTIONS.get(cmd, []))
+            if cmd == "/tools":
+                options.extend(self._tool_names())
             for opt in options:
                 if opt.startswith(word):
                     yield Completion(opt, start_position=-len(word))
@@ -139,10 +154,11 @@ class Shell:
         status = await self.session.start()
         self._print_status(status)
 
-        # Prompt loop
+        # Prompt loop — pass weak ref to session for dynamic tool completion
+        session_ref = weakref.ref(self.session)
         prompt_session: PromptSession = PromptSession(
             history=InMemoryHistory(),
-            completer=_SlashCompleter(),
+            completer=_SlashCompleter(session_ref),
             key_bindings=_make_key_bindings(),
             multiline=True,
         )
