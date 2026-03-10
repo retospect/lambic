@@ -223,7 +223,8 @@ class McpClientPool:
                     "name": name,
                     "enabled": tool.enabled,
                     "server_status": conn.status if conn else "unknown",
-                    "description": tool.description[:60],
+                    "description": tool.description,
+                    "input_schema": tool.input_schema,
                 }
             )
         return rows

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from lambic.core.config import LlmConfig, ShellConfig
-from lambic.core.session import ChatSession, ToolResult
+from lambic.core.session import ChatSession, ToolResult, _build_tool_signature
 from lambic.core.llm import ToolCall
 
 
@@ -99,6 +99,37 @@ class TestCommands:
     def test_expand_missing(self):
         result = self.session._handle_command("/expand tc_999")
         assert "No stored result" in result
+
+
+class TestBuildToolSignature:
+    def test_required_and_optional(self):
+        schema = {
+            "properties": {
+                "query": {"type": "string"},
+                "top_k": {"type": "integer", "default": 5},
+                "style": {"type": "string", "default": "summary"},
+            },
+            "required": ["query"],
+        }
+        sig = _build_tool_signature("acatome.search", schema)
+        assert sig == 'acatome.search(query, top_k=5, style=\'summary\')'
+
+    def test_all_required(self):
+        schema = {
+            "properties": {"a": {"type": "string"}, "b": {"type": "integer"}},
+            "required": ["a", "b"],
+        }
+        assert _build_tool_signature("x.y", schema) == "x.y(a, b)"
+
+    def test_no_params(self):
+        assert _build_tool_signature("x.y", {}) == "x.y()"
+
+    def test_optional_infers_type(self):
+        schema = {
+            "properties": {"flag": {"type": "boolean"}},
+            "required": [],
+        }
+        assert _build_tool_signature("x.y", schema) == "x.y(flag=false)"
 
 
 class TestTruncation:

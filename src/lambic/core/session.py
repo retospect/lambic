@@ -17,6 +17,38 @@ log = logging.getLogger("lambic.session")
 
 # Max tool-calling rounds per user turn (prevent infinite loops)
 MAX_TOOL_ROUNDS = 10
+
+
+def _build_tool_signature(name: str, schema: dict[str, Any]) -> str:
+    """Build a function-signature string from tool name + JSON schema.
+
+    Example: ``acatome.paper(id, filter="", page=1)``
+    """
+    props = schema.get("properties", {})
+    required = set(schema.get("required", []))
+    params = []
+    for pname, pinfo in props.items():
+        if pname in required:
+            params.append(pname)
+        else:
+            # Show default if available, otherwise infer from type
+            default = pinfo.get("default")
+            if default is not None:
+                params.append(f"{pname}={default!r}")
+            else:
+                ptype = pinfo.get("type", "")
+                placeholder = {
+                    "string": '""',
+                    "integer": "0",
+                    "number": "0",
+                    "boolean": "false",
+                    "array": "[]",
+                    "object": "{}",
+                }.get(ptype, "None")
+                params.append(f"{pname}={placeholder}")
+    return f"{name}({', '.join(params)})"
+
+
 MAX_AUTOCONTINUE = 5
 
 
@@ -303,7 +335,11 @@ class ChatSession:
                 for r in rows:
                     marker = "✓" if r["enabled"] else "✗"
                     srv = "●" if r["server_status"] == "connected" else "○"
-                    lines.append(f"  {srv} {marker} {r['name']:40s} {r['description']}")
+                    sig = _build_tool_signature(r["name"], r.get("input_schema", {}))
+                    desc = (r.get("description") or "").split("\n")[0].strip()
+                    lines.append(f"  {srv} {marker} {sig}")
+                    if desc:
+                        lines.append(f"      {desc}")
                 return "\n".join(lines)
             action = parts[1].lower()
             pattern = parts[2] if len(parts) > 2 else "*"
