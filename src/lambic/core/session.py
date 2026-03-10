@@ -340,7 +340,8 @@ class ChatSession:
                     lines.append(f"  {srv} {marker} {sig}")
                     if desc:
                         lines.append(f"      {desc}")
-                return "\n".join(lines)
+                    lines.append("")  # blank line between tools
+                return "\n".join(lines).rstrip()
             action = parts[1].lower()
             pattern = parts[2] if len(parts) > 2 else "*"
             if action == "off":
