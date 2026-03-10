@@ -1,0 +1,322 @@
+"""Terminal UI — prompt_toolkit input + rich output."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Any
+
+from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.key_binding import KeyBindings
+from rich.console import Console
+from rich.live import Live
+from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.text import Text
+
+from lambic.core.config import ShellConfig
+from lambic.core.session import ChatSession, TurnEvent
+
+log = logging.getLogger("lambic.tui")
+
+# Slash commands for tab completion
+_SLASH_COMMANDS = [
+    ("/model", "switch LLM (provider/model)"),
+    ("/think", "toggle reasoning mode (on|off)"),
+    ("/tools", "list/toggle tools (on|off pattern)"),
+    ("/max_tokens", "show/set output token limit"),
+    ("/more", "continue generation (opt. N tokens)"),
+    ("/autocontinue", "autocontinue on truncation (on|off)"),
+    ("/expand", "show full tool result (call_id)"),
+    ("/status", "session info"),
+    ("/clear", "clear history"),
+    ("/quit", "exit"),
+    ("/help", "show commands"),
+]
+
+
+class _SlashCompleter(Completer):
+    """Tab-complete /commands at the start of input."""
+
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor.lstrip()
+        if not text.startswith("/"):
+            return
+        # Only complete if cursor is still in the first word
+        if " " in text:
+            return
+        for cmd, desc in _SLASH_COMMANDS:
+            if cmd.startswith(text):
+                yield Completion(
+                    cmd,
+                    start_position=-len(text),
+                    display_meta=desc,
+                )
+
+
+def _make_key_bindings() -> KeyBindings:
+    """Enter submits, Alt+Enter (Esc Enter) inserts newline."""
+    kb = KeyBindings()
+
+    @kb.add("enter")
+    def _submit(event):
+        event.current_buffer.validate_and_handle()
+
+    @kb.add("escape", "enter")
+    def _newline(event):
+        event.current_buffer.insert_text("\n")
+
+    return kb
+
+
+class Shell:
+    """Terminal chat shell."""
+
+    def __init__(
+        self,
+        config: ShellConfig | None = None,
+        *,
+        model: Any = None,
+        servers: list[Any] | None = None,
+        system_prompt: str = "",
+        **kwargs: Any,
+    ) -> None:
+        if config is None:
+            from lambic.core.config import LlmConfig, McpServer
+
+            llm = model if isinstance(model, LlmConfig) else LlmConfig()
+            svrs = servers or []
+            config = ShellConfig(
+                llm=llm,
+                servers=svrs,
+                system_prompt=system_prompt,
+                **kwargs,
+            )
+        self.config = config
+        self.console = Console()
+        self.session: ChatSession | None = None
+
+    def run(self) -> None:
+        """Synchronous entry point."""
+        try:
+            asyncio.run(self._run_async())
+        except KeyboardInterrupt:
+            self.console.print("\n[dim]Goodbye.[/dim]")
+
+    async def _run_async(self) -> None:
+        self.session = ChatSession(self.config)
+
+        # Connect
+        self.console.print(
+            Panel(
+                "[bold]lambic[/bold] — MCP-aware LLM shell",
+                style="blue",
+                expand=False,
+            )
+        )
+        self.console.print("[dim]Connecting...[/dim]")
+
+        status = await self.session.start()
+        self._print_status(status)
+
+        # Prompt loop
+        prompt_session: PromptSession = PromptSession(
+            history=InMemoryHistory(),
+            completer=_SlashCompleter(),
+            key_bindings=_make_key_bindings(),
+            multiline=True,
+        )
+
+        try:
+            while True:
+                try:
+                    user_input = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: prompt_session.prompt(
+                            HTML("<b><ansigreen>› </ansigreen></b>")
+                        ),
+                    )
+                except EOFError:
+                    break
+
+                user_input = user_input.strip()
+                if not user_input:
+                    continue
+
+                result = await self._process_turn(user_input)
+                if result == "__MORE__":
+                    await self._process_turn("Continue from where you left off.")
+                    # Restore max_tokens if it was temporarily changed
+                    session = self.session
+                    if session and hasattr(session, "_more_restore_tokens"):
+                        if session._more_extra:
+                            session.config.llm.max_tokens = session._more_restore_tokens
+                            session.llm.config.max_tokens = session._more_restore_tokens
+
+        finally:
+            await self.session.close()
+
+    def _stop_live(self, live: Live | None, md_buffer: str) -> None:
+        """Finalize and stop a Live markdown render."""
+        if live is None:
+            return
+        if md_buffer.strip():
+            live.update(Markdown(md_buffer))
+        live.stop()
+
+    async def _process_turn(self, user_input: str) -> str | None:
+        """Process one user turn, rendering events to the terminal.
+
+        Returns '__MORE__' if /more was invoked, None otherwise.
+        """
+        assert self.session is not None
+
+        md_buffer = ""
+        live: Live | None = None
+        more_signal = None
+
+        async for event in self.session.turn(user_input):
+            if event.kind == "text":
+                if event.data == "__QUIT__":
+                    self._stop_live(live, md_buffer)
+                    self.console.print("[dim]Goodbye.[/dim]")
+                    raise SystemExit(0)
+
+                if event.data == "__MORE__":
+                    more_signal = "__MORE__"
+                    continue
+
+                md_buffer += event.data
+                if live is None:
+                    live = Live(
+                        Markdown(md_buffer),
+                        console=self.console,
+                        refresh_per_second=4,
+                    )
+                    live.start()
+                else:
+                    live.update(Markdown(md_buffer))
+
+            elif event.kind == "tool_result":
+                self._stop_live(live, md_buffer)
+                live = None
+                md_buffer = ""
+                self._print_tool_result(event.data)
+
+            elif event.kind == "thinking":
+                self._stop_live(live, md_buffer)
+                live = None
+                md_buffer = ""
+                self.console.print(
+                    Panel(
+                        Text(event.data[:500], style="dim italic"),
+                        title="[dim]thinking[/dim]",
+                        border_style="dim",
+                        expand=False,
+                    )
+                )
+
+            elif event.kind == "error":
+                self._stop_live(live, md_buffer)
+                live = None
+                md_buffer = ""
+                self.console.print(f"[bold red]Error:[/bold red] {event.data}")
+
+            elif event.kind == "usage":
+                self._stop_live(live, md_buffer)
+                live = None
+                md_buffer = ""
+                self._print_usage(event.data)
+
+            elif event.kind == "done":
+                self._stop_live(live, md_buffer)
+                live = None
+                md_buffer = ""
+                self.console.print()  # blank line after response
+
+        return more_signal
+
+    def _print_usage(self, usage: dict) -> None:
+        """Show token usage and truncation hint."""
+        prompt = usage.get("prompt_tokens", 0)
+        completion = usage.get("completion_tokens", 0)
+        stop = usage.get("stop_reason", "")
+        max_tok = usage.get("max_tokens", 0)
+        auto = usage.get("autocontinue", False)
+
+        parts = []
+        if prompt or completion:
+            parts.append(f"{prompt}→{completion} tokens")
+        if stop == "length":
+            if auto:
+                parts.append(
+                    f"[bold yellow]⚠ hit max_tokens ({max_tok})[/bold yellow] "
+                    f"— auto-continuing…"
+                )
+            else:
+                parts.append(
+                    f"[bold yellow]⚠ hit max_tokens ({max_tok})[/bold yellow] "
+                    f"— type [bold]/more[/bold] to continue"
+                )
+        elif auto:
+            parts.append("[dim cyan]↻ auto-continuing…[/dim cyan]")
+
+        if parts:
+            self.console.print(f"[dim]  {' · '.join(parts)}[/dim]")
+
+    def _print_tool_result(self, tr: Any) -> None:
+        """Render a tool call + result."""
+        # Show the call
+        args_str = ", ".join(f"{k}={v!r}" for k, v in tr.call.arguments.items())
+        call_text = f"{tr.call.name}({args_str})"
+
+        # Truncation indicator
+        trunc = " [truncated]" if tr.truncated else ""
+        timing = f"{tr.elapsed:.1f}s"
+
+        self.console.print(
+            Panel(
+                Text(call_text, style="bold cyan"),
+                title=f"[dim]tool call · {timing}{trunc}[/dim]",
+                border_style="cyan",
+                expand=False,
+            )
+        )
+
+        # Show result (abbreviated)
+        result_preview = tr.result
+        if len(result_preview) > 2000:
+            result_preview = result_preview[:2000] + "\n..."
+
+        self.console.print(
+            Panel(
+                result_preview,
+                title="[dim]result[/dim]",
+                border_style="dim",
+                expand=False,
+            )
+        )
+
+    def _print_status(self, status: dict) -> None:
+        """Print connection status."""
+        llm_icon = "●" if status["llm_ok"] else "○"
+        llm_color = "green" if status["llm_ok"] else "red"
+        think = "on" if status["think"] else "off"
+
+        self.console.print(
+            f"  [{llm_color}]{llm_icon}[/{llm_color}] LLM: "
+            f"[bold]{status['model']}[/bold] (think: {think})"
+        )
+
+        for name, srv_status in status.get("servers", {}).items():
+            icon = "●" if srv_status == "connected" else "○"
+            color = "green" if srv_status == "connected" else "red"
+            self.console.print(f"  [{color}]{icon}[/{color}] {name}: {srv_status}")
+
+        self.console.print(
+            f"  [dim]{status['tools']} tools available. "
+            f"Type /help for commands.[/dim]\n"
+        )
