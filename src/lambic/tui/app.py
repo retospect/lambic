@@ -37,24 +37,39 @@ _SLASH_COMMANDS = [
     ("/help", "show commands"),
 ]
 
+# Subcommand options for tab completion (command → list of options)
+_SLASH_SUBOPTIONS: dict[str, list[str]] = {
+    "/think": ["on", "off"],
+    "/tools": ["on", "off"],
+    "/autocontinue": ["on", "off"],
+}
+
 
 class _SlashCompleter(Completer):
-    """Tab-complete /commands at the start of input."""
+    """Tab-complete /commands and their subcommand options."""
 
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor.lstrip()
         if not text.startswith("/"):
             return
-        # Only complete if cursor is still in the first word
-        if " " in text:
-            return
-        for cmd, desc in _SLASH_COMMANDS:
-            if cmd.startswith(text):
-                yield Completion(
-                    cmd,
-                    start_position=-len(text),
-                    display_meta=desc,
-                )
+
+        if " " not in text:
+            # First word — complete command name
+            for cmd, desc in _SLASH_COMMANDS:
+                if cmd.startswith(text):
+                    yield Completion(
+                        cmd,
+                        start_position=-len(text),
+                        display_meta=desc,
+                    )
+        else:
+            # Second word — complete subcommand options
+            cmd, _, rest = text.partition(" ")
+            word = rest.lstrip()
+            options = _SLASH_SUBOPTIONS.get(cmd, [])
+            for opt in options:
+                if opt.startswith(word):
+                    yield Completion(opt, start_position=-len(word))
 
 
 def _make_key_bindings() -> KeyBindings:
