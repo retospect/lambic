@@ -129,7 +129,7 @@ class ChatSession:
         # Check for slash commands
         if user_input.startswith("/"):
             result = self._handle_command(user_input)
-            yield TurnEvent("text", result)
+            yield TurnEvent("command", result)
             yield TurnEvent("done")
             return
 
@@ -391,18 +391,21 @@ class ChatSession:
             think = "on" if self.config.llm.think else "off"
             ac = "on" if self.autocontinue else "off"
             lines = [
-                f"  ● LLM: {self.config.llm.spec} (think: {think})",
+                f"  [green]●[/green] LLM: [bold]{self.config.llm.spec}[/bold] (think: {think})",
             ]
             for name, conn in self.mcp.connections.items():
-                icon = "●" if conn.status == "connected" else "○"
+                if conn.status == "connected":
+                    icon = "[green]●[/green]"
+                else:
+                    icon = "[red]○[/red]"
                 err = f" ({conn.error})" if conn.error else ""
                 lines.append(f"  {icon} {name}: {conn.status}{err}")
             n_tools = len(self.mcp.enabled_tool_schemas())
             n_msgs = len(self.messages)
             lines.append(
-                f"  {n_tools} tools, {n_msgs} messages, "
+                f"  [dim]{n_tools} tools, {n_msgs} messages, "
                 f"max_tokens: {self.config.llm.max_tokens}, "
-                f"autocontinue: {ac}"
+                f"autocontinue: {ac}[/dim]"
             )
             return "\n".join(lines)
 

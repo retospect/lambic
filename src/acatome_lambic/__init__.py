@@ -1,6 +1,6 @@
 """lambic — MCP-aware LLM shell with provider switching."""
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 from acatome_lambic.core.config import LlmConfig, McpServer, ShellConfig
 from acatome_lambic.core.session import ChatSession

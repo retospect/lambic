@@ -149,7 +149,9 @@ class Shell:
                 expand=False,
             )
         )
-        self.console.print("[dim]Connecting...[/dim]")
+        self.console.print(
+            f"[dim]Connecting to [bold]{self.config.llm.spec}[/bold]...[/dim]"
+        )
 
         status = await self.session.start()
         self._print_status(status)
@@ -292,6 +294,12 @@ class Shell:
                             expand=False,
                         )
                     )
+
+                elif event.kind == "command":
+                    self._stop_live(live, md_buffer)
+                    live = None
+                    md_buffer = ""
+                    self.console.print(event.data)
 
                 elif event.kind == "error":
                     self._stop_live(live, md_buffer)
