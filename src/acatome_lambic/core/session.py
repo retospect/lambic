@@ -235,25 +235,30 @@ class ChatSession:
                 # Emit usage info
                 if final_response:
                     truncated = final_response.stop_reason == "length"
-                    # Autocontinue: also trigger when model has tools but
-                    # produced only text (described a plan but didn't act)
+                    thinking = final_response.thinking or ""
+                    # Autocontinue triggers:
+                    #  1. Truncated (ran out of tokens)
+                    #  2. Had tools + produced text (described plan but didn't act)
+                    #  3. Had tools + produced nothing (stuck — maybe tool XML in thinking)
                     should_autocontinue = False
                     if self.autocontinue and autocontinue_count < MAX_AUTOCONTINUE:
                         if truncated:
                             should_autocontinue = True
                         elif tools and collected_content:
-                            # Model had tools available but chose to output
-                            # text instead — nudge it to act
+                            should_autocontinue = True
+                        elif tools and not collected_content and thinking:
+                            # Model thought but produced no output — stuck
                             should_autocontinue = True
 
                     log.info(
-                        "stop_reason=%s continuing=%s count=%d/%d has_tools=%s text_len=%d",
+                        "stop_reason=%s continuing=%s count=%d/%d has_tools=%s text_len=%d think_len=%d",
                         final_response.stop_reason,
                         should_autocontinue,
                         autocontinue_count,
                         MAX_AUTOCONTINUE,
                         bool(tools),
                         len(collected_content),
+                        len(thinking),
                     )
 
                     yield TurnEvent(
@@ -272,12 +277,19 @@ class ChatSession:
                         autocontinue_count += 1
                         if truncated:
                             msg = "Continue from where you left off."
-                        elif _has_broken_tool_xml(collected_content):
+                        elif _has_broken_tool_xml(
+                            collected_content + thinking
+                        ):
                             msg = (
                                 "Your tool call was not recognized — it was "
-                                "output as plain text instead of a function "
-                                "call. Do NOT write XML tags. Just call the "
-                                "tool normally."
+                                "output as text instead of a function call. "
+                                "Do NOT write XML tags. Just call the tool "
+                                "normally."
+                            )
+                        elif not collected_content:
+                            msg = (
+                                "You produced thinking but no output or tool "
+                                "calls. Continue and use the available tools."
                             )
                         else:
                             msg = "Continue. Use the available tools to do the work."
