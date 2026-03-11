@@ -191,6 +191,8 @@ class Shell:
                     continue
 
                 result = await self._run_turn(user_input)
+                if result == "__QUIT__":
+                    break
                 if result == "__MORE__":
                     await self._run_turn(
                         "Continue from where you left off."
@@ -299,6 +301,12 @@ class Shell:
                     self._stop_live(live, md_buffer)
                     live = None
                     md_buffer = ""
+                    if event.data == "__QUIT__":
+                        self.console.print("[dim]Goodbye.[/dim]")
+                        return "__QUIT__"
+                    if event.data == "__MORE__":
+                        more_signal = "__MORE__"
+                        continue
                     self.console.print(event.data)
 
                 elif event.kind == "error":

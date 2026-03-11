@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "acatome-lambic"
-version = "0.2.1"
+version = "0.2.2"
 description = "MCP-aware LLM shell with provider switching"
 readme = "README.md"
 license = "MIT"
@@ -30,7 +30,7 @@ packages = ["src/acatome_lambic"]
 asyncio_mode = "auto"
 
 [tool.bumpversion]
-current_version = "0.2.1"
+current_version = "0.2.2"
 commit = true
 tag = true
 tag_name = "v{new_version}"
