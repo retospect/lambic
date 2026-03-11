@@ -51,6 +51,21 @@ def _build_tool_signature(name: str, schema: dict[str, Any]) -> str:
 
 MAX_AUTOCONTINUE = 5
 
+# Patterns that indicate the model tried to make a tool call via XML text
+# instead of using the API's function calling mechanism.
+_BROKEN_TOOL_PATTERNS = (
+    "<function=",
+    "<tool_call>",
+    "<|tool_call|>",
+    "</tool_call>",
+    "<parameter=",
+)
+
+
+def _has_broken_tool_xml(text: str) -> bool:
+    """Check if text contains XML-like tool call patterns."""
+    return any(p in text for p in _BROKEN_TOOL_PATTERNS)
+
 
 @dataclass
 class ToolResult:
@@ -257,6 +272,13 @@ class ChatSession:
                         autocontinue_count += 1
                         if truncated:
                             msg = "Continue from where you left off."
+                        elif _has_broken_tool_xml(collected_content):
+                            msg = (
+                                "Your tool call was not recognized — it was "
+                                "output as plain text instead of a function "
+                                "call. Do NOT write XML tags. Just call the "
+                                "tool normally."
+                            )
                         else:
                             msg = "Continue. Use the available tools to do the work."
                         self.messages.append({"role": "user", "content": msg})
