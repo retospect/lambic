@@ -85,7 +85,7 @@ class ChatSession:
         self.messages: list[dict[str, Any]] = []
         self.tool_results_full: dict[str, str] = {}
         self._tool_call_counter = 0
-        self.autocontinue: bool = False
+        self.autocontinue: bool = True
 
         if config.system_prompt:
             self.messages.append({"role": "system", "content": config.system_prompt})
