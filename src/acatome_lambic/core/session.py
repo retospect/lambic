@@ -101,6 +101,7 @@ class ChatSession:
         self.tool_results_full: dict[str, str] = {}
         self._tool_call_counter = 0
         self.autocontinue: bool = True
+        self.task_reminder: str = ""  # injected on auto-continue
 
         if config.system_prompt:
             self.messages.append({"role": "system", "content": config.system_prompt})
@@ -141,8 +142,20 @@ class ChatSession:
 
     async def turn(self, user_input: str) -> AsyncIterator[TurnEvent]:
         """Process one user turn. Yields TurnEvents for the TUI."""
+        # Check for message commands first (transform into LLM messages)
+        if user_input.startswith("/") and self.config.message_commands:
+            verb = user_input.strip().split()[0].lower().lstrip("/")
+            if verb in self.config.message_commands:
+                # Set task reminder if a reminder builder is registered
+                if verb in self.config.task_reminder_commands:
+                    self.task_reminder = self.config.task_reminder_commands[verb](
+                        user_input
+                    )
+                user_input = self.config.message_commands[verb](user_input)
+                # Fall through to normal LLM interaction
+
         # Check for slash commands
-        if user_input.startswith("/"):
+        elif user_input.startswith("/"):
             result = self._handle_command(user_input)
             yield TurnEvent("command", result)
             yield TurnEvent("done")
@@ -169,8 +182,7 @@ class ChatSession:
                 log.error("LLM error: %s", exc)
                 yield TurnEvent(
                     "error",
-                    f"LLM error: {exc}\n"
-                    f"Is {self.config.llm.spec} reachable?",
+                    f"LLM error: {exc}\n" f"Is {self.config.llm.spec} reachable?",
                 )
                 # Remove the user message we just added
                 if self.messages and self.messages[-1]["role"] == "user":
@@ -194,9 +206,11 @@ class ChatSession:
                                 "type": "function",
                                 "function": {
                                     "name": tc.name,
-                                    "arguments": json.dumps(tc.arguments)
-                                    if isinstance(tc.arguments, dict)
-                                    else tc.arguments,
+                                    "arguments": (
+                                        json.dumps(tc.arguments)
+                                        if isinstance(tc.arguments, dict)
+                                        else tc.arguments
+                                    ),
                                 },
                             }
                             for tc in final_response.tool_calls
@@ -277,9 +291,7 @@ class ChatSession:
                         autocontinue_count += 1
                         if truncated:
                             msg = "Continue from where you left off."
-                        elif _has_broken_tool_xml(
-                            collected_content + thinking
-                        ):
+                        elif _has_broken_tool_xml(collected_content + thinking):
                             msg = (
                                 "Your tool call was not recognized — it was "
                                 "output as text instead of a function call. "
@@ -293,6 +305,8 @@ class ChatSession:
                             )
                         else:
                             msg = "Continue. Use the available tools to do the work."
+                        if self.task_reminder:
+                            msg += f"\n\nReminder:\n{self.task_reminder}"
                         self.messages.append({"role": "user", "content": msg})
                         continue
                 break
@@ -490,20 +504,23 @@ class ChatSession:
             return "__MORE__"
 
         elif verb in ("/help", "/?"):
-            return (
-                "```\n"
-                "/model [provider/model]   switch LLM\n"
-                "/think [on|off]           toggle reasoning mode\n"
-                "/tools [on|off] [pattern] list/toggle tools\n"
-                "/max_tokens [N]           show/set output token limit\n"
-                "/more [N]                 continue generation (opt. N tokens)\n"
-                "/autocontinue [on|off]    autocontinue on truncation\n"
-                "/expand <call_id>         show full tool result\n"
-                "/status                   session info\n"
-                "/clear                    clear history\n"
-                "/quit                     exit\n"
-                "```"
-            )
+            lines = [
+                "```",
+                "/model [provider/model]   switch LLM",
+                "/think [on|off]           toggle reasoning mode",
+                "/tools [on|off] [pattern] list/toggle tools",
+                "/max_tokens [N]           show/set output token limit",
+                "/more [N]                 continue generation (opt. N tokens)",
+                "/autocontinue [on|off]    autocontinue on truncation",
+                "/expand <call_id>         show full tool result",
+                "/status                   session info",
+                "/clear                    clear history",
+                "/quit                     exit",
+            ]
+            for cmd_name in sorted(self.config.message_commands):
+                lines.append(f"/{cmd_name} <prompt>          → LLM")
+            lines.append("```")
+            return "\n".join(lines)
 
         return f"Unknown command: {verb}. Type /help for commands."
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 @dataclass
@@ -56,6 +56,10 @@ class ShellConfig:
     system_prompt: str = ""
     max_tool_result: int = 8192
     log_file: str = ""
+    message_commands: dict[str, Callable[[str], str]] = field(default_factory=dict)
+    task_reminder_commands: dict[str, Callable[[str], str]] = field(
+        default_factory=dict
+    )
 
     @classmethod
     def from_toml(cls, path: str | Path) -> ShellConfig:

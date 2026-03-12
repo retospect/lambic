@@ -175,7 +175,9 @@ class LlmClient:
                             args = json.loads(args)
                         except (json.JSONDecodeError, TypeError):
                             args = {}
-                    converted.append({"function": {"name": fn["name"], "arguments": args}})
+                    converted.append(
+                        {"function": {"name": fn["name"], "arguments": args}}
+                    )
                 m["tool_calls"] = converted
 
             # Ollama ignores tool_call_id — just pass role + content
@@ -410,7 +412,9 @@ class LlmClient:
                 completion_tokens = getattr(usage, "completion_tokens", 0) or 0
 
         # Normalize stop reason
-        stop_reason = finish_reason or ("tool_calls" if accumulated_tool_calls else "stop")
+        stop_reason = finish_reason or (
+            "tool_calls" if accumulated_tool_calls else "stop"
+        )
         if stop_reason == "end_turn":
             stop_reason = "stop"
 
@@ -425,9 +429,7 @@ class LlmClient:
                     except json.JSONDecodeError:
                         args = {}
                 name = self._name_map.get(tc["name"], tc["name"])
-                tool_calls.append(
-                    ToolCall(id=tc["id"], name=name, arguments=args)
-                )
+                tool_calls.append(ToolCall(id=tc["id"], name=name, arguments=args))
             yield LlmResponse(
                 content=accumulated_content,
                 tool_calls=tool_calls,

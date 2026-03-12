@@ -206,9 +206,7 @@ class McpClientPool:
         affected = []
         for qname, tool in self._tools.items():
             candidates = (qname, tool.server_name, tool.name)
-            if any(
-                fnmatch.fnmatch(c, p) for c in candidates for p in patterns
-            ):
+            if any(fnmatch.fnmatch(c, p) for c in candidates for p in patterns):
                 tool.enabled = enabled
                 affected.append(qname)
         return affected

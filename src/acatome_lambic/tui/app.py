@@ -181,9 +181,7 @@ class Shell:
                 except EOFError:
                     break
                 except KeyboardInterrupt:
-                    self.console.print(
-                        "\n[dim]  /quit to exit[/dim]"
-                    )
+                    self.console.print("\n[dim]  /quit to exit[/dim]")
                     continue
 
                 user_input = user_input.strip()
@@ -194,19 +192,13 @@ class Shell:
                 if result == "__QUIT__":
                     break
                 if result == "__MORE__":
-                    await self._run_turn(
-                        "Continue from where you left off."
-                    )
+                    await self._run_turn("Continue from where you left off.")
                     # Restore max_tokens if it was temporarily changed
                     session = self.session
                     if session and hasattr(session, "_more_restore_tokens"):
                         if session._more_extra:
-                            session.config.llm.max_tokens = (
-                                session._more_restore_tokens
-                            )
-                            session.llm.config.max_tokens = (
-                                session._more_restore_tokens
-                            )
+                            session.config.llm.max_tokens = session._more_restore_tokens
+                            session.llm.config.max_tokens = session._more_restore_tokens
 
         finally:
             loop.remove_signal_handler(signal.SIGINT)

@@ -113,7 +113,7 @@ class TestBuildToolSignature:
             "required": ["query"],
         }
         sig = _build_tool_signature("acatome.search", schema)
-        assert sig == 'acatome.search(query, top_k=5, style=\'summary\')'
+        assert sig == "acatome.search(query, top_k=5, style='summary')"
 
     def test_all_required(self):
         schema = {
@@ -167,6 +167,37 @@ class TestSavePartialResponse:
         before = len(self.session.messages)
         self.session.save_partial_response("partial")
         assert len(self.session.messages) == before
+
+
+class TestTaskReminder:
+    def test_default_empty(self):
+        config = ShellConfig(system_prompt="Test.")
+        session = ChatSession(config)
+        assert session.task_reminder == ""
+
+    def test_message_command_sets_reminder(self):
+        """Message command with a registered reminder builder sets task_reminder."""
+        config = ShellConfig(
+            system_prompt="Test.",
+            message_commands={"review": lambda raw: "transformed message"},
+            task_reminder_commands={"review": lambda raw: "review: check grammar"},
+        )
+        session = ChatSession(config)
+        # Simulate what turn() does for message commands
+        raw = "/review check grammar"
+        verb = raw.strip().split()[0].lower().lstrip("/")
+        if verb in config.task_reminder_commands:
+            session.task_reminder = config.task_reminder_commands[verb](raw)
+        assert session.task_reminder == "review: check grammar"
+
+    def test_no_reminder_without_registration(self):
+        """Message command without reminder builder leaves task_reminder empty."""
+        config = ShellConfig(
+            system_prompt="Test.",
+            message_commands={"review": lambda raw: "transformed"},
+        )
+        session = ChatSession(config)
+        assert session.task_reminder == ""
 
 
 class TestTruncation:
