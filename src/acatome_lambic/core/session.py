@@ -407,7 +407,6 @@ class ChatSession:
                     lines.append(f"  {srv} {marker} {sig}")
                     if desc:
                         lines.append(f"      {desc}")
-                    lines.append("")
                 return "\n".join(lines).strip()
             action = parts[1].lower()
             # Support both "/tools off acatome" and "/tools acatome off"
