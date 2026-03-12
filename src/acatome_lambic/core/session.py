@@ -403,18 +403,27 @@ class ChatSession:
                     srv = "●" if r["server_status"] == "connected" else "○"
                     sig = _build_tool_signature(r["name"], r.get("input_schema", {}))
                     desc = (r.get("description") or "").split("\n")[0].strip()
+                    desc = desc.replace("[", "\\[")  # escape Rich markup
                     lines.append(f"  {srv} {marker} {sig}")
                     if desc:
                         lines.append(f"      {desc}")
                     lines.append("")
                 return "\n".join(lines).strip()
             action = parts[1].lower()
+            # Support both "/tools off acatome" and "/tools acatome off"
             if action in ("on", "off"):
                 pattern = parts[2] if len(parts) > 2 else "*"
                 enabled = action == "on"
+            elif len(parts) > 2 and parts[2].lower() in ("on", "off"):
+                pattern = action
+                enabled = parts[2].lower() == "on"
+            else:
+                pattern = None
+                enabled = False
+            if pattern is not None:
                 affected = self.mcp.set_tools_enabled(pattern, enabled)
-                verb = "Enabled" if enabled else "Disabled"
-                return f"{verb} {len(affected)} tool(s): {', '.join(affected)}"
+                label = "Enabled" if enabled else "Disabled"
+                return f"{label} {len(affected)} tool(s): {', '.join(affected)}"
             # /tools <name> — show full details for a specific tool
             rows = self.mcp.tool_status()
             match = [r for r in rows if r["name"] == action]
@@ -424,7 +433,7 @@ class ChatSession:
             if match:
                 r = match[0]
                 sig = _build_tool_signature(r["name"], r.get("input_schema", {}))
-                desc = r.get("description") or "(no description)"
+                desc = (r.get("description") or "(no description)").replace("[", "\\[")
                 return f"{sig}\n\n{desc}"
             return "Usage: /tools [on|off|<name>] [pattern]"
 
