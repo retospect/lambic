@@ -182,7 +182,10 @@ class Shell:
 
         # Install SIGINT handler that cancels the current turn task
         loop = asyncio.get_event_loop()
-        loop.add_signal_handler(signal.SIGINT, self._on_sigint)
+        try:
+            loop.add_signal_handler(signal.SIGINT, self._on_sigint)
+        except NotImplementedError:
+            pass  # Windows: signal handlers not supported, KeyboardInterrupt still works
 
         try:
             while True:
@@ -216,7 +219,10 @@ class Shell:
                             session.llm.config.max_tokens = session._more_restore_tokens
 
         finally:
-            loop.remove_signal_handler(signal.SIGINT)
+            try:
+                loop.remove_signal_handler(signal.SIGINT)
+            except NotImplementedError:
+                pass  # Windows
             await self.session.close()
 
     async def _run_turn(self, user_input: str) -> str | None:
