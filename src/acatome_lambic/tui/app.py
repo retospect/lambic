@@ -436,14 +436,9 @@ class Shell:
             )
         )
 
-        # Show result (abbreviated)
-        result_preview = tr.result
-        if len(result_preview) > 2000:
-            result_preview = result_preview[:2000] + "\n..."
-
         self.console.print(
             Panel(
-                result_preview,
+                tr.result,
                 title="[dim]result[/dim]",
                 border_style="dim",
                 expand=False,
