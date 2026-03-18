@@ -173,24 +173,35 @@ class ChatSession:
             collected_content = ""
             final_response: LlmResponse | None = None
 
-            try:
-                async for item in self.llm.stream(self.messages, tools or None):
-                    if isinstance(item, str):
-                        collected_content += item
-                        yield TurnEvent("text", item)
-                    elif isinstance(item, LlmResponse):
-                        final_response = item
-            except Exception as exc:
-                log.error("LLM error: %s", exc)
-                yield TurnEvent(
-                    "error",
-                    f"LLM error: {exc}\n" f"Is {self.config.llm.spec} reachable?",
-                )
-                # Remove the user message we just added
-                if self.messages and self.messages[-1]["role"] == "user":
-                    self.messages.pop()
-                yield TurnEvent("done")
-                return
+            _MAX_LLM_RETRIES = 3
+            for _attempt in range(_MAX_LLM_RETRIES):
+                try:
+                    async for item in self.llm.stream(self.messages, tools or None):
+                        if isinstance(item, str):
+                            collected_content += item
+                            yield TurnEvent("text", item)
+                        elif isinstance(item, LlmResponse):
+                            final_response = item
+                    break  # success
+                except Exception as exc:
+                    if _attempt < _MAX_LLM_RETRIES - 1:
+                        log.warning("LLM error (attempt %d/%d, retrying): %s",
+                                    _attempt + 1, _MAX_LLM_RETRIES, exc)
+                        yield TurnEvent("status", f"LLM error, retrying ({_attempt + 1}/{_MAX_LLM_RETRIES})...")
+                        collected_content = ""
+                        final_response = None
+                        continue
+                    log.error("LLM error (attempt %d/%d, giving up): %s",
+                              _attempt + 1, _MAX_LLM_RETRIES, exc)
+                    yield TurnEvent(
+                        "error",
+                        f"LLM error: {exc}\n" f"Is {self.config.llm.spec} reachable?",
+                    )
+                    # Remove the user message we just added
+                    if self.messages and self.messages[-1]["role"] == "user":
+                        self.messages.pop()
+                    yield TurnEvent("done")
+                    return
 
             # If we got a final response with tool calls
             if final_response and final_response.tool_calls:

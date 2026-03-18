@@ -364,6 +364,12 @@ class Shell:
                         continue
                     self.console.print(event.data)
 
+                elif event.kind == "status":
+                    self._stop_live(live, md_buffer)
+                    live = None
+                    md_buffer = ""
+                    self.console.print(f"[dim yellow]{event.data}[/dim yellow]")
+
                 elif event.kind == "error":
                     self._stop_live(live, md_buffer)
                     live = None
