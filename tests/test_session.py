@@ -37,7 +37,7 @@ class TestCommands:
 
     def test_model_show(self):
         result = self.session._handle_command("/model")
-        assert "ollama/qwen3.5:9b" in result
+        assert "ollama_chat/qwen3.5:9b" in result
 
     def test_model_switch(self):
         result = self.session._handle_command("/model openai/gpt-4o-mini")
@@ -47,7 +47,7 @@ class TestCommands:
 
     def test_model_switch_no_provider(self):
         result = self.session._handle_command("/model llama3.2:3b")
-        assert "ollama/llama3.2:3b" in result
+        assert "ollama_chat/llama3.2:3b" in result
 
     def test_think_show(self):
         result = self.session._handle_command("/think")
@@ -66,7 +66,7 @@ class TestCommands:
 
     def test_status(self):
         result = self.session._handle_command("/status")
-        assert "ollama/qwen3.5:9b" in result
+        assert "ollama_chat/qwen3.5:9b" in result
         assert "think: on" in result
         assert "messages" in result
         assert "autocontinue:" in result
@@ -224,6 +224,72 @@ class TestCustomCommands:
         session = ChatSession(config)
         result = session._handle_command("/db")
         assert "Unknown command" in result
+
+
+class TestParseErrorInterception:
+    """Tests for malformed JSON tool call handling in session."""
+
+    def test_parse_error_returns_error_result(self):
+        """__parse_error__ in args should produce ERROR result without calling tool."""
+        import asyncio
+
+        config = ShellConfig(system_prompt="Test.")
+        session = ChatSession(config)
+
+        tc = ToolCall(
+            id="call_1",
+            name="precis.get",
+            arguments={"__parse_error__": '{"id":"a"}{"id":"b"}'},
+        )
+        results = asyncio.run(session._execute_tools([tc]))
+        assert len(results) == 1
+        assert "ERROR" in results[0].result
+        assert "malformed JSON" in results[0].result
+        assert "comma-separated" in results[0].result
+
+    def test_extract_last_hint_finds_get(self):
+        """Should extract get(id='...') from recent successful tool results."""
+        config = ShellConfig(system_prompt="Test.")
+        session = ChatSession(config)
+        session.messages.append({"role": "user", "content": "search MOF"})
+        session.messages.append({
+            "role": "tool",
+            "tool_call_id": "tc_1",
+            "content": (
+                "5 results for: MOF\n"
+                "  chen2020#23  (0.16)\n\n"
+                "Next:\n"
+                "  get(id='chen2020#23')  — read this chunk\n"
+                "  get(id='chen2020/toc')  — paper structure"
+            ),
+        })
+        hint = session._extract_last_hint()
+        assert hint == "get(id='chen2020#23')"
+
+    def test_extract_last_hint_skips_errors(self):
+        """Should skip ERROR tool results and find hints from earlier results."""
+        config = ShellConfig(system_prompt="Test.")
+        session = ChatSession(config)
+        session.messages.append({"role": "user", "content": "search MOF"})
+        session.messages.append({
+            "role": "tool",
+            "tool_call_id": "tc_1",
+            "content": "Next:\n  get(id='slug1#5')  — read",
+        })
+        session.messages.append({
+            "role": "tool",
+            "tool_call_id": "tc_2",
+            "content": "ERROR: id required",
+        })
+        hint = session._extract_last_hint()
+        assert hint == "get(id='slug1#5')"
+
+    def test_extract_last_hint_empty_when_no_hints(self):
+        """Should return empty string when no hints found."""
+        config = ShellConfig(system_prompt="Test.")
+        session = ChatSession(config)
+        session.messages.append({"role": "user", "content": "hello"})
+        assert session._extract_last_hint() == ""
 
 
 class TestTruncation:

@@ -18,6 +18,47 @@ from acatome_lambic.core.config import LlmConfig
 log = logging.getLogger("lambic.llm")
 
 
+def _merge_concatenated_json(raw: str) -> dict[str, Any] | None:
+    """Try to parse concatenated JSON objects and merge into one dict.
+
+    Models like qwen concatenate multiple JSON objects when they want to
+    batch calls: ``{"id":"a#1"}{"id":"b#2"}``.  This splits them apart
+    and merges: string values with the same key are joined with commas,
+    giving ``{"id": "a#1,b#2"}``.  Returns None if splitting fails.
+    """
+    decoder = json.JSONDecoder()
+    objects: list[dict[str, Any]] = []
+    pos = 0
+    s = raw.strip()
+    while pos < len(s):
+        # skip whitespace
+        while pos < len(s) and s[pos] in " \t\n\r":
+            pos += 1
+        if pos >= len(s):
+            break
+        try:
+            obj, end = decoder.raw_decode(s, pos)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(obj, dict):
+            return None
+        objects.append(obj)
+        pos = end
+    if len(objects) < 2:
+        return None  # not concatenated — let caller handle
+
+    # Merge: join string values with commas, first-wins for others
+    merged: dict[str, Any] = {}
+    for obj in objects:
+        for k, v in obj.items():
+            if k not in merged:
+                merged[k] = v
+            elif isinstance(merged[k], str) and isinstance(v, str):
+                merged[k] += "," + v
+            # else: keep first value
+    return merged
+
+
 @dataclass
 class ToolCall:
     """A tool call returned by the LLM."""
@@ -113,12 +154,45 @@ class LlmClient:
         return self.config.provider == "ollama"
 
     async def check_connection(self) -> bool:
-        """Check if the LLM backend is reachable."""
+        """Check if the LLM backend is reachable and model is available."""
         if self.is_ollama:
             try:
                 http = await self._get_http()
                 resp = await http.get(f"{self.config.ollama_url}/api/tags")
                 resp.raise_for_status()
+                models = {
+                    m["name"] for m in resp.json().get("models", [])
+                }
+                target = self.config.model
+                if target not in models and f"{target}:latest" not in models:
+                    log.warning(
+                        "Model %r not found locally, pulling from ollama...",
+                        target,
+                    )
+                    try:
+                        async with http.stream(
+                            "POST",
+                            f"{self.config.ollama_url}/api/pull",
+                            json={"name": target},
+                            timeout=httpx.Timeout(600.0),
+                        ) as pull_resp:
+                            if pull_resp.status_code != 200:
+                                log.error("Failed to pull model %r", target)
+                                return False
+                            async for line in pull_resp.aiter_lines():
+                                try:
+                                    msg = json.loads(line)
+                                    status = msg.get("status", "")
+                                    if "completed" in msg and "total" in msg:
+                                        pct = int(msg["completed"] / msg["total"] * 100)
+                                        log.info("Pulling %s: %s %d%%", target, status, pct)
+                                    elif status:
+                                        log.info("Pulling %s: %s", target, status)
+                                except (json.JSONDecodeError, KeyError, ZeroDivisionError):
+                                    pass
+                    except Exception as exc:
+                        log.error("Failed to pull model %r: %s", target, exc)
+                        return False
                 return True
             except Exception:
                 return False
@@ -130,8 +204,6 @@ class LlmClient:
         tools: list[dict[str, Any]] | None = None,
     ) -> LlmResponse:
         """Non-streaming completion with optional tool calling."""
-        if self.is_ollama:
-            return await self._ollama_complete(messages, tools)
         return await self._litellm_complete(messages, tools)
 
     async def stream(
@@ -144,12 +216,8 @@ class LlmClient:
         Yields str chunks for text content.
         If the LLM returns tool calls, yields a final LlmResponse with tool_calls.
         """
-        if self.is_ollama:
-            async for item in self._ollama_stream(messages, tools):
-                yield item
-        else:
-            async for item in self._litellm_stream(messages, tools):
-                yield item
+        async for item in self._litellm_stream(messages, tools):
+            yield item
 
     # ── Ollama backend ──────────────────────────────────────────────
 
@@ -313,12 +381,19 @@ class LlmClient:
 
         self.config.ensure_api_keys()
         litellm.suppress_debug_info = True
+        logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+
+        think = self.config.think if self.is_ollama else False
+        log.info("%s  think=%s  tools=%d", self.config.spec, think, len(tools or []))
 
         kwargs: dict[str, Any] = {
             "model": self.config.spec,
             "messages": messages,
             "max_tokens": self.config.max_tokens,
         }
+        if self.is_ollama:
+            kwargs["api_base"] = self.config.ollama_url
+            kwargs["think"] = self.config.think
         if tools:
             litellm_tools, self._name_map = tools_to_litellm(tools)
             kwargs["tools"] = litellm_tools
@@ -344,6 +419,7 @@ class LlmClient:
         return LlmResponse(
             content=msg.content or "",
             tool_calls=tool_calls,
+            thinking=getattr(msg, "reasoning_content", "") or "",
         )
 
     async def _litellm_stream(
@@ -355,6 +431,10 @@ class LlmClient:
 
         self.config.ensure_api_keys()
         litellm.suppress_debug_info = True
+        logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+
+        think = self.config.think if self.is_ollama else False
+        log.info("%s  think=%s  tools=%d  stream", self.config.spec, think, len(tools or []))
 
         kwargs: dict[str, Any] = {
             "model": self.config.spec,
@@ -362,6 +442,9 @@ class LlmClient:
             "max_tokens": self.config.max_tokens,
             "stream": True,
         }
+        if self.is_ollama:
+            kwargs["api_base"] = self.config.ollama_url
+            kwargs["think"] = self.config.think
         if tools:
             litellm_tools, self._name_map = tools_to_litellm(tools)
             kwargs["tools"] = litellm_tools
@@ -423,11 +506,22 @@ class LlmClient:
             for idx in sorted(accumulated_tool_calls):
                 tc = accumulated_tool_calls[idx]
                 args = tc["arguments"]
+                log.info(
+                    "RAW tool_call[%d]: name=%r args_type=%s args=%r",
+                    idx, tc["name"], type(args).__name__, args[:500] if isinstance(args, str) else args,
+                )
                 if isinstance(args, str):
                     try:
                         args = json.loads(args)
                     except json.JSONDecodeError:
-                        args = {}
+                        merged = _merge_concatenated_json(args)
+                        if merged is not None:
+                            log.info("Merged %d concatenated JSON objects", len(args.split("}{")) )
+                            args = merged
+                        else:
+                            log.warning("Failed to parse tool args JSON: %r", args[:200])
+                            args = {"__parse_error__": args}
+                log.info("PARSED tool_call[%d]: name=%r args=%r", idx, tc["name"], args)
                 name = self._name_map.get(tc["name"], tc["name"])
                 tool_calls.append(ToolCall(id=tc["id"], name=name, arguments=args))
             yield LlmResponse(

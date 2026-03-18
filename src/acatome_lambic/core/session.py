@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable
@@ -16,7 +17,7 @@ from acatome_lambic.core.mcp_client import McpClientPool
 log = logging.getLogger("lambic.session")
 
 # Max tool-calling rounds per user turn (prevent infinite loops)
-MAX_TOOL_ROUNDS = 10
+MAX_TOOL_ROUNDS = 100
 
 
 def _build_tool_signature(name: str, schema: dict[str, Any]) -> str:
@@ -167,6 +168,7 @@ class ChatSession:
         autocontinue_count = 0
 
         for _round in range(MAX_TOOL_ROUNDS):
+            log.info("turn round=%d msgs=%d autocontinue=%s", _round, len(self.messages), self.autocontinue)
             # Stream LLM response
             collected_content = ""
             final_response: LlmResponse | None = None
@@ -220,8 +222,11 @@ class ChatSession:
 
                 # Execute tool calls (parallel across servers)
                 results = await self._execute_tools(final_response.tool_calls)
+                has_error = False
                 for tr in results:
                     yield TurnEvent("tool_result", tr)
+                    if "ERROR" in tr.result[:20]:
+                        has_error = True
 
                     # Add tool result to messages
                     self.messages.append(
@@ -232,6 +237,31 @@ class ChatSession:
                         }
                     )
 
+                # Detect repeated error tool calls (model stuck)
+                if has_error:
+                    error_streak = 0
+                    for msg in reversed(self.messages):
+                        if msg["role"] == "tool" and "ERROR" in msg["content"][:20]:
+                            error_streak += 1
+                        elif msg["role"] == "tool":
+                            break
+                        elif msg["role"] == "user":
+                            break
+                    if error_streak >= 2:
+                        # Try to find a concrete hint from recent tool results
+                        hint = self._extract_last_hint()
+                        nudge = (
+                            "STOP calling tools with empty parameters. "
+                            "You MUST pass arguments."
+                        )
+                        if hint:
+                            nudge += f"\nDo exactly this: {hint}"
+                        self.messages.append(
+                            {"role": "user", "content": nudge}
+                        )
+
+                # Tool calls are productive — reset autocontinue counter
+                autocontinue_count = 0
                 # Continue loop — LLM will see tool results
                 continue
 
@@ -246,70 +276,89 @@ class ChatSession:
                 if content:
                     self.messages.append({"role": "assistant", "content": content})
 
-                # Emit usage info
-                if final_response:
-                    truncated = final_response.stop_reason == "length"
-                    thinking = final_response.thinking or ""
-                    # Autocontinue triggers:
-                    #  1. Truncated (ran out of tokens)
-                    #  2. Had tools + produced text (described plan but didn't act)
-                    #  3. Had tools + produced nothing (stuck — maybe tool XML in thinking)
-                    should_autocontinue = False
-                    if self.autocontinue and autocontinue_count < MAX_AUTOCONTINUE:
-                        if truncated:
-                            should_autocontinue = True
-                        elif tools and collected_content:
-                            should_autocontinue = True
-                        elif tools and not collected_content and thinking:
-                            # Model thought but produced no output — stuck
-                            should_autocontinue = True
+                # Autocontinue decision
+                truncated = (
+                    final_response.stop_reason == "length" if final_response else False
+                )
+                thinking = (final_response.thinking or "") if final_response else ""
+                has_tools = bool(tools)
 
-                    log.info(
-                        "stop_reason=%s continuing=%s count=%d/%d has_tools=%s text_len=%d think_len=%d",
-                        final_response.stop_reason,
-                        should_autocontinue,
-                        autocontinue_count,
-                        MAX_AUTOCONTINUE,
-                        bool(tools),
-                        len(collected_content),
-                        len(thinking),
-                    )
+                # Autocontinue when: truncated, or tools available (model
+                # should be using them, not just writing text).
+                should_autocontinue = (
+                    self.autocontinue
+                    and autocontinue_count < MAX_AUTOCONTINUE
+                    and (truncated or has_tools)
+                )
 
-                    yield TurnEvent(
-                        "usage",
-                        {
-                            "prompt_tokens": final_response.prompt_tokens,
-                            "completion_tokens": final_response.completion_tokens,
-                            "stop_reason": final_response.stop_reason,
-                            "max_tokens": self.config.llm.max_tokens,
-                            "autocontinue": should_autocontinue,
-                        },
-                    )
+                stop_reason = (
+                    final_response.stop_reason if final_response else "no_response"
+                )
+                log.info(
+                    "round=%d stop=%s autocontinue=%s count=%d/%d tools=%s text=%d think=%d",
+                    _round,
+                    stop_reason,
+                    should_autocontinue,
+                    autocontinue_count,
+                    MAX_AUTOCONTINUE,
+                    has_tools,
+                    len(collected_content),
+                    len(thinking),
+                )
 
-                    # Auto-continue: inject continuation and loop
-                    if should_autocontinue:
-                        autocontinue_count += 1
-                        if truncated:
-                            msg = "Continue from where you left off."
-                        elif _has_broken_tool_xml(collected_content + thinking):
-                            msg = (
-                                "Your tool call was not recognized — it was "
-                                "output as text instead of a function call. "
-                                "Do NOT write XML tags. Just call the tool "
-                                "normally."
-                            )
-                        elif not collected_content:
-                            msg = (
-                                "You produced thinking but no output or tool "
-                                "calls. Continue and use the available tools."
-                            )
-                        else:
-                            msg = "Continue. Use the available tools to do the work."
-                        if self.task_reminder:
-                            msg += f"\n\nReminder:\n{self.task_reminder}"
-                        self.messages.append({"role": "user", "content": msg})
-                        continue
+                # Emit usage info (even for empty responses)
+                yield TurnEvent(
+                    "usage",
+                    {
+                        "prompt_tokens": (
+                            final_response.prompt_tokens if final_response else 0
+                        ),
+                        "completion_tokens": (
+                            final_response.completion_tokens if final_response else 0
+                        ),
+                        "stop_reason": stop_reason,
+                        "max_tokens": self.config.llm.max_tokens,
+                        "autocontinue": should_autocontinue,
+                    },
+                )
+
+                # Auto-continue: inject continuation and loop
+                if should_autocontinue:
+                    autocontinue_count += 1
+                    if truncated:
+                        msg = "Continue from where you left off."
+                    elif _has_broken_tool_xml(collected_content + thinking):
+                        msg = (
+                            "Your tool call was not recognized — it was "
+                            "output as text instead of a function call. "
+                            "Do NOT write XML tags. Just call the tool "
+                            "normally."
+                        )
+                    elif not collected_content:
+                        msg = (
+                            "You produced no output or tool calls. "
+                            "Continue and use the available tools."
+                        )
+                    else:
+                        msg = "Continue. Use the available tools to do the work."
+                    if self.task_reminder:
+                        msg += f"\n\nReminder:\n{self.task_reminder}"
+                    self.messages.append({"role": "user", "content": msg})
+                    continue
                 break
+        else:
+            # for-loop exhausted MAX_TOOL_ROUNDS without breaking
+            log.warning("Hit MAX_TOOL_ROUNDS=%d — stopping turn", MAX_TOOL_ROUNDS)
+            yield TurnEvent(
+                "usage",
+                {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "stop_reason": f"max_rounds ({MAX_TOOL_ROUNDS})",
+                    "max_tokens": self.config.llm.max_tokens,
+                    "autocontinue": False,
+                },
+            )
 
         yield TurnEvent("done")
 
@@ -320,19 +369,39 @@ class ChatSession:
             self._tool_call_counter += 1
             call_id = f"tc_{self._tool_call_counter}"
 
+            # Catch malformed JSON from the LLM (concatenated objects etc.)
+            if "__parse_error__" in tc.arguments:
+                return ToolResult(
+                    call=tc,
+                    result=(
+                        "ERROR: Your tool call had malformed JSON arguments — "
+                        "multiple JSON objects were concatenated. "
+                        "Make ONE tool call at a time with valid arguments. "
+                        "To read multiple chunks, use comma-separated ids: "
+                        "get(id='slug1#4,slug2#9,slug3#3')"
+                    ),
+                    full_result=tc.arguments.get("__parse_error__", ""),
+                    truncated=False,
+                    elapsed=0,
+                )
+
             start = time.monotonic()
             full_result = await self.mcp.call_tool(tc.name, tc.arguments)
             elapsed = time.monotonic() - start
 
-            # Truncate if needed
+            # Truncate if needed (head + tail so LLM sees both ends)
             truncated = False
             result = full_result
             max_len = self.config.max_tool_result
             if len(full_result) > max_len:
+                head_len = int(max_len * 0.75)
+                tail_len = max_len - head_len
+                omitted = len(full_result) - head_len - tail_len
                 result = (
-                    full_result[:max_len]
-                    + f"\n[truncated {len(full_result)} → {max_len} chars. "
-                    f"Use /expand {call_id} for full result]"
+                    full_result[:head_len]
+                    + f"\n\n[… {omitted} chars omitted. "
+                    f"Use /expand {call_id} for full result]\n\n"
+                    + full_result[-tail_len:]
                 )
                 truncated = True
                 self.tool_results_full[call_id] = full_result
@@ -365,6 +434,20 @@ class ChatSession:
             else:
                 final.append(r)
         return final
+
+    # Regex to find concrete tool-call hints like get(id='slug#N')
+    _HINT_RE = re.compile(r"(?:get|search)\((?:id|query)='[^']+?'[^)]*\)")
+
+    def _extract_last_hint(self) -> str:
+        """Scan recent tool results for a concrete hint the model can copy."""
+        for msg in reversed(self.messages):
+            if msg["role"] == "tool" and "ERROR" not in msg["content"][:20]:
+                m = self._HINT_RE.search(msg["content"])
+                if m:
+                    return m.group(0)
+            elif msg["role"] == "user":
+                break
+        return ""
 
     def _handle_command(self, cmd: str) -> str:
         """Handle slash commands. Returns response text."""
@@ -404,23 +487,26 @@ class ChatSession:
                     sig = _build_tool_signature(r["name"], r.get("input_schema", {}))
                     desc = (r.get("description") or "").split("\n")[0].strip()
                     desc = desc.replace("[", "\\[")  # escape Rich markup
-                    lines.append(f"  {srv} {marker} {sig}")
+                    lines.append(f"{srv} {marker} {sig}")
                     if desc:
-                        lines.append(f"      {desc}")
-                return "\n".join(lines).strip()
+                        lines.append(f"    {desc}")
+                return "\n".join(lines)
             action = parts[1].lower()
-            # Support both "/tools off acatome" and "/tools acatome off"
+            rest = cmd.strip().split()[2:]  # all tokens after verb + action
+            # Support both "/tools off perplexity grandmofty" and "/tools perplexity off"
             if action in ("on", "off"):
-                pattern = parts[2] if len(parts) > 2 else "*"
+                patterns = rest if rest else ["*"]
                 enabled = action == "on"
-            elif len(parts) > 2 and parts[2].lower() in ("on", "off"):
-                pattern = action
-                enabled = parts[2].lower() == "on"
+            elif rest and rest[-1].lower() in ("on", "off"):
+                enabled = rest[-1].lower() == "on"
+                patterns = [action] + list(rest[:-1])
             else:
-                pattern = None
+                patterns = None
                 enabled = False
-            if pattern is not None:
-                affected = self.mcp.set_tools_enabled(pattern, enabled)
+            if patterns is not None:
+                affected = []
+                for pat in patterns:
+                    affected.extend(self.mcp.set_tools_enabled(pat, enabled))
                 label = "Enabled" if enabled else "Disabled"
                 return f"{label} {len(affected)} tool(s): {', '.join(affected)}"
             # /tools <name> — show full details for a specific tool
@@ -465,6 +551,35 @@ class ChatSession:
                 f"max_tokens: {self.config.llm.max_tokens}, "
                 f"autocontinue: {ac}[/dim]"
             )
+            return "\n".join(lines)
+
+        elif verb == "/prompt":
+            tools = self.mcp.enabled_tool_schemas()
+            lines = []
+            for i, msg in enumerate(self.messages):
+                role = msg.get("role", "?")
+                content = msg.get("content", "")
+                tc = msg.get("tool_calls", [])
+                lines.append(f"--- \\[{i}] {role} ---")
+                if content:
+                    lines.append(content.replace("[", "\\["))
+                if tc:
+                    for call in tc:
+                        fn = call.get("function", {})
+                        lines.append(f"  → {fn.get('name', '?')}({fn.get('arguments', '')})")
+                lines.append("")
+            if tools:
+                lines.append(f"--- tools ({len(tools)}) ---")
+                for t in tools:
+                    name = t.get("name", "?")
+                    desc = t.get("description", "")
+                    schema = t.get("inputSchema", {})
+                    sig = _build_tool_signature(name, schema)
+                    lines.append(f"\n  {sig}")
+                    if desc:
+                        for dline in desc.strip().split("\n"):
+                            lines.append(f"    {dline.replace('[', chr(92) + '[')}")
+                lines.append("")
             return "\n".join(lines)
 
         elif verb == "/clear":
@@ -522,6 +637,7 @@ class ChatSession:
                 "/autocontinue [on|off]    autocontinue on truncation",
                 "/expand <call_id>         show full tool result",
                 "/status                   session info",
+                "/prompt                   dump full LLM prompt",
                 "/clear                    clear history",
                 "/quit                     exit",
             ]

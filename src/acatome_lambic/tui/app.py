@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
 import weakref
 from typing import Any
@@ -34,6 +35,7 @@ _SLASH_COMMANDS = [
     ("/autocontinue", "autocontinue on truncation (on|off)"),
     ("/expand", "show full tool result (call_id)"),
     ("/status", "session info"),
+    ("/prompt", "dump full LLM prompt"),
     ("/clear", "clear history"),
     ("/quit", "exit"),
     ("/help", "show commands"),
@@ -61,6 +63,35 @@ class _SlashCompleter(Completer):
         if session is None:
             return []
         return list(session.mcp._tools.keys())
+
+    def _model_names(self) -> list[str]:
+        """Get available model names for /model completion."""
+        models: list[str] = []
+        # Ollama models (cached, fetched once)
+        if not hasattr(self, "_ollama_cache"):
+            self._ollama_cache: list[str] = []
+            try:
+                import httpx
+                resp = httpx.get("http://localhost:11434/api/tags", timeout=1.0)
+                if resp.status_code == 200:
+                    for m in resp.json().get("models", []):
+                        self._ollama_cache.append(m["name"])
+            except Exception:
+                pass
+        models.extend(self._ollama_cache)
+        # Claude models if API key present
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            models.extend([
+                "anthropic/claude-sonnet-4-20250514",
+                "anthropic/claude-3-5-haiku-20241022",
+            ])
+        # OpenAI models if API key present
+        if os.environ.get("OPENAI_API_KEY"):
+            models.extend([
+                "openai/gpt-4o",
+                "openai/gpt-4o-mini",
+            ])
+        return models
 
     def _extra_commands(self) -> list[tuple[str, str]]:
         """Get custom and message commands from the live session config."""
@@ -92,13 +123,24 @@ class _SlashCompleter(Completer):
                         display_meta=desc,
                     )
         else:
-            # Second word — complete subcommand options + tool names
-            cmd, _, rest = text.partition(" ")
-            word = rest.lstrip()
-            options = list(_SLASH_SUBOPTIONS.get(cmd, []))
+            # Complete the last word being typed
+            cmd = text.split()[0]
+            words = text.split()
+            word = words[-1] if len(words) > 1 and not text.endswith(" ") else ""
+            # First argument: subcommand options + tool names
+            # Subsequent arguments: tool/server names (for multi-pattern)
+            options = []
+            if len(words) <= 2 and not text.endswith(" "):
+                options = list(_SLASH_SUBOPTIONS.get(cmd, []))
             if cmd == "/tools":
                 options.extend(self._tool_names())
-            for opt in options:
+                # Also offer server names for bulk toggling
+                options.extend(
+                    sorted({n.split(".")[0] for n in self._tool_names()})
+                )
+            if cmd == "/model":
+                options.extend(self._model_names())
+            for opt in sorted(set(options)):
                 if opt.startswith(word):
                     yield Completion(opt, start_position=-len(word))
 

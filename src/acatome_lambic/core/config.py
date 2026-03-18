@@ -16,14 +16,15 @@ class LlmConfig:
     model: str = "qwen3.5:9b"
     think: bool = True
     ollama_url: str = "http://localhost:11434"
-    max_tokens: int = 100_000
+    max_tokens: int = 50_000
     temperature: float = 0.7
     api_keys: dict[str, str] = field(default_factory=dict)
 
     @property
     def spec(self) -> str:
-        """litellm-style model spec, e.g. 'ollama/qwen3.5:9b'."""
-        return f"{self.provider}/{self.model}"
+        """litellm-style model spec, e.g. 'ollama_chat/qwen3.5:9b'."""
+        prefix = "ollama_chat" if self.provider == "ollama" else self.provider
+        return f"{prefix}/{self.model}"
 
     def ensure_api_keys(self) -> None:
         """Push configured API keys into env vars (if not already set)."""

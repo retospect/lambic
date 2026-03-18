@@ -17,7 +17,7 @@ class TestLlmConfig:
         assert cfg.provider == "ollama"
         assert cfg.model == "qwen3.5:9b"
         assert cfg.think is True
-        assert cfg.spec == "ollama/qwen3.5:9b"
+        assert cfg.spec == "ollama_chat/qwen3.5:9b"
 
     def test_spec(self):
         cfg = LlmConfig(provider="openai", model="gpt-4o-mini")
