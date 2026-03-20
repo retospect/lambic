@@ -398,7 +398,7 @@ class LlmClient:
             litellm_tools, self._name_map = tools_to_litellm(tools)
             kwargs["tools"] = litellm_tools
 
-        resp = await litellm.acompletion(**kwargs)
+        resp = await litellm.acompletion(num_retries=3, **kwargs)
         msg = resp.choices[0].message
 
         tool_calls = []
@@ -449,7 +449,7 @@ class LlmClient:
             litellm_tools, self._name_map = tools_to_litellm(tools)
             kwargs["tools"] = litellm_tools
 
-        resp = await litellm.acompletion(**kwargs)
+        resp = await litellm.acompletion(num_retries=3, **kwargs)
 
         accumulated_content = ""
         accumulated_tool_calls: dict[int, dict] = {}
