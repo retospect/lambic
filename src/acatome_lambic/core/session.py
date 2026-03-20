@@ -184,7 +184,8 @@ class ChatSession:
                             final_response = item
                     break  # success
                 except Exception as exc:
-                    if _attempt < _MAX_LLM_RETRIES - 1:
+                    is_rate_limit = "RateLimitError" in type(exc).__name__ or "rate_limit" in str(exc).lower()
+                    if _attempt < _MAX_LLM_RETRIES - 1 and not is_rate_limit:
                         log.warning("LLM error (attempt %d/%d, retrying): %s",
                                     _attempt + 1, _MAX_LLM_RETRIES, exc)
                         yield TurnEvent("status", f"LLM error, retrying ({_attempt + 1}/{_MAX_LLM_RETRIES})...")
