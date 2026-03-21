@@ -383,17 +383,20 @@ class LlmClient:
         litellm.suppress_debug_info = True
         logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
-        think = self.config.think if self.is_ollama else False
+        think = self.config.think
         log.info("%s  think=%s  tools=%d", self.config.spec, think, len(tools or []))
 
         kwargs: dict[str, Any] = {
             "model": self.config.spec,
             "messages": messages,
             "max_tokens": self.config.max_tokens,
+            "drop_params": True,
         }
         if self.is_ollama:
             kwargs["api_base"] = self.config.ollama_url
-            kwargs["think"] = self.config.think
+            kwargs["think"] = think
+        elif think:
+            kwargs["thinking"] = {"type": "enabled", "budget_tokens": 10000}
         if tools:
             litellm_tools, self._name_map = tools_to_litellm(tools)
             kwargs["tools"] = litellm_tools
@@ -433,7 +436,7 @@ class LlmClient:
         litellm.suppress_debug_info = True
         logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
-        think = self.config.think if self.is_ollama else False
+        think = self.config.think
         log.info("%s  think=%s  tools=%d  stream", self.config.spec, think, len(tools or []))
 
         kwargs: dict[str, Any] = {
@@ -441,10 +444,13 @@ class LlmClient:
             "messages": messages,
             "max_tokens": self.config.max_tokens,
             "stream": True,
+            "drop_params": True,
         }
         if self.is_ollama:
             kwargs["api_base"] = self.config.ollama_url
-            kwargs["think"] = self.config.think
+            kwargs["think"] = think
+        elif think:
+            kwargs["thinking"] = {"type": "enabled", "budget_tokens": 10000}
         if tools:
             litellm_tools, self._name_map = tools_to_litellm(tools)
             kwargs["tools"] = litellm_tools
@@ -452,6 +458,7 @@ class LlmClient:
         resp = await litellm.acompletion(num_retries=8, **kwargs)
 
         accumulated_content = ""
+        accumulated_thinking = ""
         accumulated_tool_calls: dict[int, dict] = {}
         finish_reason = ""
         prompt_tokens = 0
@@ -466,6 +473,11 @@ class LlmClient:
             # Capture finish_reason from the final chunk
             if getattr(choice, "finish_reason", None):
                 finish_reason = choice.finish_reason
+
+            # Accumulate reasoning/thinking content (Anthropic, DeepSeek, etc.)
+            rc = getattr(delta, "reasoning_content", None) if delta else None
+            if rc:
+                accumulated_thinking += rc
 
             if delta and delta.content:
                 accumulated_content += delta.content
@@ -527,6 +539,7 @@ class LlmClient:
             yield LlmResponse(
                 content=accumulated_content,
                 tool_calls=tool_calls,
+                thinking=accumulated_thinking,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 stop_reason=stop_reason,
@@ -534,6 +547,7 @@ class LlmClient:
         else:
             yield LlmResponse(
                 content=accumulated_content,
+                thinking=accumulated_thinking,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 stop_reason=stop_reason,
