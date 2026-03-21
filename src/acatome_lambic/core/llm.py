@@ -395,8 +395,13 @@ class LlmClient:
         if self.is_ollama:
             kwargs["api_base"] = self.config.ollama_url
             kwargs["think"] = think
-        elif think:
-            kwargs["thinking"] = {"type": "enabled", "budget_tokens": 10000}
+        else:
+            if think:
+                kwargs["thinking"] = {"type": "enabled", "budget_tokens": 10000}
+            kwargs["cache_control_injection_points"] = [
+                {"location": "message", "role": "system"},
+                {"location": "message", "index": -1},
+            ]
         if tools:
             litellm_tools, self._name_map = tools_to_litellm(tools)
             kwargs["tools"] = litellm_tools
@@ -449,8 +454,13 @@ class LlmClient:
         if self.is_ollama:
             kwargs["api_base"] = self.config.ollama_url
             kwargs["think"] = think
-        elif think:
-            kwargs["thinking"] = {"type": "enabled", "budget_tokens": 10000}
+        else:
+            if think:
+                kwargs["thinking"] = {"type": "enabled", "budget_tokens": 10000}
+            kwargs["cache_control_injection_points"] = [
+                {"location": "message", "role": "system"},
+                {"location": "message", "index": -1},
+            ]
         if tools:
             litellm_tools, self._name_map = tools_to_litellm(tools)
             kwargs["tools"] = litellm_tools
