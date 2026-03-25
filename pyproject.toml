@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "acatome-lambic"
-version = "0.5.1"
+version = "0.5.2"
 description = "MCP-aware LLM shell with provider switching"
 readme = "README.md"
 license = "GPL-3.0-or-later"
