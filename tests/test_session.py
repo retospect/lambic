@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
-
 from acatome_lambic.core.config import LlmConfig, ShellConfig
-from acatome_lambic.core.session import ChatSession, ToolResult, _build_tool_signature
 from acatome_lambic.core.llm import ToolCall
+from acatome_lambic.core.session import ChatSession, _build_tool_signature
 
 
 class TestCommands:
@@ -252,17 +250,19 @@ class TestParseErrorInterception:
         config = ShellConfig(system_prompt="Test.")
         session = ChatSession(config)
         session.messages.append({"role": "user", "content": "search MOF"})
-        session.messages.append({
-            "role": "tool",
-            "tool_call_id": "tc_1",
-            "content": (
-                "5 results for: MOF\n"
-                "  chen2020~23  (0.16)\n\n"
-                "Next:\n"
-                "  get(id='chen2020~23')  — read this chunk\n"
-                "  get(id='chen2020/toc')  — paper structure"
-            ),
-        })
+        session.messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": "tc_1",
+                "content": (
+                    "5 results for: MOF\n"
+                    "  chen2020~23  (0.16)\n\n"
+                    "Next:\n"
+                    "  get(id='chen2020~23')  — read this chunk\n"
+                    "  get(id='chen2020/toc')  — paper structure"
+                ),
+            }
+        )
         hint = session._extract_last_hint()
         assert hint == "get(id='chen2020~23')"
 
@@ -271,16 +271,20 @@ class TestParseErrorInterception:
         config = ShellConfig(system_prompt="Test.")
         session = ChatSession(config)
         session.messages.append({"role": "user", "content": "search MOF"})
-        session.messages.append({
-            "role": "tool",
-            "tool_call_id": "tc_1",
-            "content": "Next:\n  get(id='slug1~5')  — read",
-        })
-        session.messages.append({
-            "role": "tool",
-            "tool_call_id": "tc_2",
-            "content": "ERROR: id required",
-        })
+        session.messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": "tc_1",
+                "content": "Next:\n  get(id='slug1~5')  — read",
+            }
+        )
+        session.messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": "tc_2",
+                "content": "ERROR: id required",
+            }
+        )
         hint = session._extract_last_hint()
         assert hint == "get(id='slug1~5')"
 

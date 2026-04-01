@@ -7,10 +7,11 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Callable
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from typing import Any
 
-from acatome_lambic.core.config import LlmConfig, ShellConfig
+from acatome_lambic.core.config import ShellConfig
 from acatome_lambic.core.llm import LlmClient, LlmResponse, ToolCall
 from acatome_lambic.core.mcp_client import McpClientPool
 
@@ -168,7 +169,12 @@ class ChatSession:
         autocontinue_count = 0
 
         for _round in range(MAX_TOOL_ROUNDS):
-            log.info("turn round=%d msgs=%d autocontinue=%s", _round, len(self.messages), self.autocontinue)
+            log.info(
+                "turn round=%d msgs=%d autocontinue=%s",
+                _round,
+                len(self.messages),
+                self.autocontinue,
+            )
             # Stream LLM response
             collected_content = ""
             final_response: LlmResponse | None = None
@@ -184,19 +190,33 @@ class ChatSession:
                             final_response = item
                     break  # success
                 except Exception as exc:
-                    is_rate_limit = "RateLimitError" in type(exc).__name__ or "rate_limit" in str(exc).lower()
+                    is_rate_limit = (
+                        "RateLimitError" in type(exc).__name__
+                        or "rate_limit" in str(exc).lower()
+                    )
                     if _attempt < _MAX_LLM_RETRIES - 1 and not is_rate_limit:
-                        log.warning("LLM error (attempt %d/%d, retrying): %s",
-                                    _attempt + 1, _MAX_LLM_RETRIES, exc)
-                        yield TurnEvent("status", f"LLM error, retrying ({_attempt + 1}/{_MAX_LLM_RETRIES})...")
+                        log.warning(
+                            "LLM error (attempt %d/%d, retrying): %s",
+                            _attempt + 1,
+                            _MAX_LLM_RETRIES,
+                            exc,
+                        )
+                        yield TurnEvent(
+                            "status",
+                            f"LLM error, retrying ({_attempt + 1}/{_MAX_LLM_RETRIES})...",
+                        )
                         collected_content = ""
                         final_response = None
                         continue
-                    log.error("LLM error (attempt %d/%d, giving up): %s",
-                              _attempt + 1, _MAX_LLM_RETRIES, exc)
+                    log.error(
+                        "LLM error (attempt %d/%d, giving up): %s",
+                        _attempt + 1,
+                        _MAX_LLM_RETRIES,
+                        exc,
+                    )
                     yield TurnEvent(
                         "error",
-                        f"LLM error: {exc}\n" f"Is {self.config.llm.spec} reachable?",
+                        f"LLM error: {exc}\nIs {self.config.llm.spec} reachable?",
                     )
                     # Remove the user message we just added
                     if self.messages and self.messages[-1]["role"] == "user":
@@ -255,9 +275,7 @@ class ChatSession:
                     for msg in reversed(self.messages):
                         if msg["role"] == "tool" and "ERROR" in msg["content"][:20]:
                             error_streak += 1
-                        elif msg["role"] == "tool":
-                            break
-                        elif msg["role"] == "user":
+                        elif msg["role"] == "tool" or msg["role"] == "user":
                             break
                     if error_streak >= 2:
                         # Try to find a concrete hint from recent tool results
@@ -268,9 +286,7 @@ class ChatSession:
                         )
                         if hint:
                             nudge += f"\nDo exactly this: {hint}"
-                        self.messages.append(
-                            {"role": "user", "content": nudge}
-                        )
+                        self.messages.append({"role": "user", "content": nudge})
 
                 # Tool calls are productive — reset autocontinue counter
                 autocontinue_count = 0
@@ -410,8 +426,7 @@ class ChatSession:
                 tail_len = max_len - head_len
                 omitted = len(full_result) - head_len - tail_len
                 result = (
-                    full_result[:head_len]
-                    + f"\n\n[… {omitted} chars omitted. "
+                    full_result[:head_len] + f"\n\n[… {omitted} chars omitted. "
                     f"Use /expand {call_id} for full result]\n\n"
                     + full_result[-tail_len:]
                 )
@@ -578,7 +593,9 @@ class ChatSession:
                 if tc:
                     for call in tc:
                         fn = call.get("function", {})
-                        lines.append(f"  → {fn.get('name', '?')}({fn.get('arguments', '')})")
+                        lines.append(
+                            f"  → {fn.get('name', '?')}({fn.get('arguments', '')})"
+                        )
                 lines.append("")
             if tools:
                 lines.append(f"--- tools ({len(tools)}) ---")

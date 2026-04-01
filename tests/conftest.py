@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from acatome_lambic.core.config import LlmConfig, McpServer, ShellConfig
+from acatome_lambic.core.config import LlmConfig, ShellConfig
 
 
 @pytest.fixture

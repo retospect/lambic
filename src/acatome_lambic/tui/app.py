@@ -21,7 +21,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from acatome_lambic.core.config import ShellConfig
-from acatome_lambic.core.session import ChatSession, TurnEvent
+from acatome_lambic.core.session import ChatSession
 
 log = logging.getLogger("lambic.tui")
 
@@ -72,6 +72,7 @@ class _SlashCompleter(Completer):
             self._ollama_cache: list[str] = []
             try:
                 import httpx
+
                 resp = httpx.get("http://localhost:11434/api/tags", timeout=1.0)
                 if resp.status_code == 200:
                     for m in resp.json().get("models", []):
@@ -81,16 +82,20 @@ class _SlashCompleter(Completer):
         models.extend(self._ollama_cache)
         # Claude models if API key present
         if os.environ.get("ANTHROPIC_API_KEY"):
-            models.extend([
-                "anthropic/claude-sonnet-4-20250514",
-                "anthropic/claude-3-5-haiku-20241022",
-            ])
+            models.extend(
+                [
+                    "anthropic/claude-sonnet-4-20250514",
+                    "anthropic/claude-3-5-haiku-20241022",
+                ]
+            )
         # OpenAI models if API key present
         if os.environ.get("OPENAI_API_KEY"):
-            models.extend([
-                "openai/gpt-4o",
-                "openai/gpt-4o-mini",
-            ])
+            models.extend(
+                [
+                    "openai/gpt-4o",
+                    "openai/gpt-4o-mini",
+                ]
+            )
         return models
 
     def _extra_commands(self) -> list[tuple[str, str]]:
@@ -135,9 +140,7 @@ class _SlashCompleter(Completer):
             if cmd == "/tools":
                 options.extend(self._tool_names())
                 # Also offer server names for bulk toggling
-                options.extend(
-                    sorted({n.split(".")[0] for n in self._tool_names()})
-                )
+                options.extend(sorted({n.split(".")[0] for n in self._tool_names()}))
             if cmd == "/model":
                 options.extend(self._model_names())
             for opt in sorted(set(options)):
@@ -173,7 +176,7 @@ class Shell:
         **kwargs: Any,
     ) -> None:
         if config is None:
-            from acatome_lambic.core.config import LlmConfig, McpServer
+            from acatome_lambic.core.config import LlmConfig
 
             llm = model if isinstance(model, LlmConfig) else LlmConfig()
             svrs = servers or []

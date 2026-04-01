@@ -8,8 +8,9 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator
+from typing import Any
 
 import httpx
 
@@ -160,9 +161,7 @@ class LlmClient:
                 http = await self._get_http()
                 resp = await http.get(f"{self.config.ollama_url}/api/tags")
                 resp.raise_for_status()
-                models = {
-                    m["name"] for m in resp.json().get("models", [])
-                }
+                models = {m["name"] for m in resp.json().get("models", [])}
                 target = self.config.model
                 if target not in models and f"{target}:latest" not in models:
                     log.warning(
@@ -185,10 +184,16 @@ class LlmClient:
                                     status = msg.get("status", "")
                                     if "completed" in msg and "total" in msg:
                                         pct = int(msg["completed"] / msg["total"] * 100)
-                                        log.info("Pulling %s: %s %d%%", target, status, pct)
+                                        log.info(
+                                            "Pulling %s: %s %d%%", target, status, pct
+                                        )
                                     elif status:
                                         log.info("Pulling %s: %s", target, status)
-                                except (json.JSONDecodeError, KeyError, ZeroDivisionError):
+                                except (
+                                    json.JSONDecodeError,
+                                    KeyError,
+                                    ZeroDivisionError,
+                                ):
                                     pass
                     except Exception as exc:
                         log.error("Failed to pull model %r: %s", target, exc)
@@ -442,7 +447,9 @@ class LlmClient:
         logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
         think = self.config.think
-        log.info("%s  think=%s  tools=%d  stream", self.config.spec, think, len(tools or []))
+        log.info(
+            "%s  think=%s  tools=%d  stream", self.config.spec, think, len(tools or [])
+        )
 
         kwargs: dict[str, Any] = {
             "model": self.config.spec,
@@ -506,9 +513,9 @@ class LlmClient:
                         if tc_delta.function.name:
                             accumulated_tool_calls[idx]["name"] = tc_delta.function.name
                         if tc_delta.function.arguments:
-                            accumulated_tool_calls[idx][
-                                "arguments"
-                            ] += tc_delta.function.arguments
+                            accumulated_tool_calls[idx]["arguments"] += (
+                                tc_delta.function.arguments
+                            )
 
             # Extract usage from the final chunk (litellm puts it on the chunk)
             usage = getattr(chunk, "usage", None)
@@ -530,7 +537,10 @@ class LlmClient:
                 args = tc["arguments"]
                 log.info(
                     "RAW tool_call[%d]: name=%r args_type=%s args=%r",
-                    idx, tc["name"], type(args).__name__, args[:500] if isinstance(args, str) else args,
+                    idx,
+                    tc["name"],
+                    type(args).__name__,
+                    args[:500] if isinstance(args, str) else args,
                 )
                 if isinstance(args, str):
                     try:
@@ -538,10 +548,15 @@ class LlmClient:
                     except json.JSONDecodeError:
                         merged = _merge_concatenated_json(args)
                         if merged is not None:
-                            log.info("Merged %d concatenated JSON objects", len(args.split("}{")) )
+                            log.info(
+                                "Merged %d concatenated JSON objects",
+                                len(args.split("}{")),
+                            )
                             args = merged
                         else:
-                            log.warning("Failed to parse tool args JSON: %r", args[:200])
+                            log.warning(
+                                "Failed to parse tool args JSON: %r", args[:200]
+                            )
                             args = {"__parse_error__": args}
                 log.info("PARSED tool_call[%d]: name=%r args=%r", idx, tc["name"], args)
                 name = self._name_map.get(tc["name"], tc["name"])

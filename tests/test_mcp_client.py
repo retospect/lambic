@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from acatome_lambic.core.mcp_client import McpClientPool, RegisteredTool
 
 

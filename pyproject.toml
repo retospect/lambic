@@ -4,11 +4,20 @@ build-backend = "hatchling.build"
 
 [project]
 name = "acatome-lambic"
-version = "0.5.2"
+version = "0.5.3"
 description = "MCP-aware LLM shell with provider switching"
 readme = "README.md"
 license = "GPL-3.0-or-later"
 requires-python = ">=3.11"
+authors = [{ name = "Reto Stamm", email = "reto@retostamm.com" }]
+keywords = ["mcp", "llm", "shell", "ollama", "litellm"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
 dependencies = [
     "httpx>=0.27",
     "mcp>=1.0",
@@ -16,31 +25,41 @@ dependencies = [
     "rich>=13.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/retospect/acatome-lambic"
+Repository = "https://github.com/retospect/acatome-lambic"
+
 [project.optional-dependencies]
 litellm = ["litellm>=1.0,!=1.82.7,!=1.82.8"]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "black>=24.0"]
 
 [project.scripts]
 acatome-lambic = "acatome_lambic.cli:main"
 
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.11",
+    "mypy>=1.15",
+    "pre-commit>=4",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/acatome_lambic"]
 
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+check_untyped_defs = true
+
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 asyncio_mode = "auto"
-
-[tool.bumpversion]
-current_version = "0.5.1"
-commit = true
-tag = true
-tag_name = "v{new_version}"
-
-[[tool.bumpversion.files]]
-filename = "pyproject.toml"
-search = 'version = "{current_version}"'
-replace = 'version = "{new_version}"'
-
-[[tool.bumpversion.files]]
-filename = "src/acatome_lambic/__init__.py"
-search = '__version__ = "{current_version}"'
-replace = '__version__ = "{new_version}"'
