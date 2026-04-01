@@ -14,7 +14,6 @@ from acatome_lambic.core.config import LlmConfig, McpServer, ShellConfig
 config = ShellConfig(
     llm=LlmConfig(provider="ollama", model="qwen3.5:9b"),
     servers=[
-        McpServer(name="acatome", cmd=["uv", "run", "acatome-mcp"]),
         McpServer(name="precis", cmd=["uv", "run", "precis"]),
     ],
     system_prompt="You are a research assistant.",

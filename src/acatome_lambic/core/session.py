@@ -390,7 +390,7 @@ class ChatSession:
                         "multiple JSON objects were concatenated. "
                         "Make ONE tool call at a time with valid arguments. "
                         "To read multiple chunks, use comma-separated ids: "
-                        "get(id='slug1#4,slug2#9,slug3#3')"
+                        "get(id='slug1~4,slug2~9,slug3~3')"
                     ),
                     full_result=tc.arguments.get("__parse_error__", ""),
                     truncated=False,
@@ -447,7 +447,7 @@ class ChatSession:
                 final.append(r)
         return final
 
-    # Regex to find concrete tool-call hints like get(id='slug#N')
+    # Regex to find concrete tool-call hints like get(id='slug~N')
     _HINT_RE = re.compile(r"(?:get|search)\((?:id|query)='[^']+?'[^)]*\)")
 
     def _extract_last_hint(self) -> str:
