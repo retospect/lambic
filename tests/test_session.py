@@ -256,15 +256,15 @@ class TestParseErrorInterception:
                 "tool_call_id": "tc_1",
                 "content": (
                     "5 results for: MOF\n"
-                    "  chen2020~23  (0.16)\n\n"
+                    "  chen2020›23  (0.16)\n\n"
                     "Next:\n"
-                    "  get(id='chen2020~23')  — read this chunk\n"
+                    "  get(id='chen2020›23')  — read this chunk\n"
                     "  get(id='chen2020/toc')  — paper structure"
                 ),
             }
         )
         hint = session._extract_last_hint()
-        assert hint == "get(id='chen2020~23')"
+        assert hint == "get(id='chen2020›23')"
 
     def test_extract_last_hint_skips_errors(self):
         """Should skip ERROR tool results and find hints from earlier results."""
@@ -275,7 +275,7 @@ class TestParseErrorInterception:
             {
                 "role": "tool",
                 "tool_call_id": "tc_1",
-                "content": "Next:\n  get(id='slug1~5')  — read",
+                "content": "Next:\n  get(id='slug1›5')  — read",
             }
         )
         session.messages.append(
@@ -286,7 +286,7 @@ class TestParseErrorInterception:
             }
         )
         hint = session._extract_last_hint()
-        assert hint == "get(id='slug1~5')"
+        assert hint == "get(id='slug1›5')"
 
     def test_extract_last_hint_empty_when_no_hints(self):
         """Should return empty string when no hints found."""

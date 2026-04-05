@@ -127,15 +127,15 @@ class TestConcatenatedJsonParsing:
         """Normal single JSON object should parse fine."""
         import json
 
-        args_str = '{"id": "wang2020state~5"}'
+        args_str = '{"id": "wang2020state›5"}'
         args = json.loads(args_str)
-        assert args == {"id": "wang2020state~5"}
+        assert args == {"id": "wang2020state›5"}
 
     def test_concatenated_json_fails_loads(self):
         """Multiple JSON objects concatenated should fail json.loads."""
         import json
 
-        args_str = '{"id": "slug1~4"}{"id": "slug2~9"}{"query": "MOF"}'
+        args_str = '{"id": "slug1›4"}{"id": "slug2›9"}{"query": "MOF"}'
         with pytest.raises(json.JSONDecodeError):
             json.loads(args_str)
 
@@ -143,31 +143,31 @@ class TestConcatenatedJsonParsing:
         """Two concatenated id objects should merge with comma."""
         from acatome_lambic.core.llm import _merge_concatenated_json
 
-        result = _merge_concatenated_json('{"id": "slug1~4"}{"id": "slug2~9"}')
-        assert result == {"id": "slug1~4,slug2~9"}
+        result = _merge_concatenated_json('{"id": "slug1›4"}{"id": "slug2›9"}')
+        assert result == {"id": "slug1›4,slug2›9"}
 
     def test_merge_many_ids(self):
         """Many concatenated id objects should all merge."""
         from acatome_lambic.core.llm import _merge_concatenated_json
 
-        raw = '{"id": "a~1"}{"id": "b~2"}{"id": "c~3"}{"id": "d~4"}'
+        raw = '{"id": "a›1"}{"id": "b›2"}{"id": "c›3"}{"id": "d›4"}'
         result = _merge_concatenated_json(raw)
-        assert result == {"id": "a~1,b~2,c~3,d~4"}
+        assert result == {"id": "a›1,b›2,c›3,d›4"}
 
     def test_merge_mixed_keys(self):
         """Mixed keys: id merges, query takes first."""
         from acatome_lambic.core.llm import _merge_concatenated_json
 
-        raw = '{"id": "slug1~4"}{"id": "slug2~9"}{"query": "MOF"}'
+        raw = '{"id": "slug1›4"}{"id": "slug2›9"}{"query": "MOF"}'
         result = _merge_concatenated_json(raw)
-        assert result["id"] == "slug1~4,slug2~9"
+        assert result["id"] == "slug1›4,slug2›9"
         assert result["query"] == "MOF"
 
     def test_merge_single_object_returns_none(self):
         """Single valid JSON should return None (not concatenated)."""
         from acatome_lambic.core.llm import _merge_concatenated_json
 
-        assert _merge_concatenated_json('{"id": "slug1~4"}') is None
+        assert _merge_concatenated_json('{"id": "slug1›4"}') is None
 
     def test_merge_garbage_returns_none(self):
         """Non-JSON garbage should return None."""
@@ -185,10 +185,10 @@ class TestConcatenatedJsonParsing:
         """Real-world case: range + single IDs."""
         from acatome_lambic.core.llm import _merge_concatenated_json
 
-        raw = '{"id": "piscopo2020strategies~60..70"}{"id": "liu2019trace~5"}{"id": "kim2017beyond~12"}'
+        raw = '{"id": "piscopo2020strategies›60..70"}{"id": "liu2019trace›5"}{"id": "kim2017beyond›12"}'
         result = _merge_concatenated_json(raw)
         assert result == {
-            "id": "piscopo2020strategies~60..70,liu2019trace~5,kim2017beyond~12"
+            "id": "piscopo2020strategies›60..70,liu2019trace›5,kim2017beyond›12"
         }
 
     def test_empty_string_produces_parse_error(self):

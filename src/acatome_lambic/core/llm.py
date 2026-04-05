@@ -23,9 +23,9 @@ def _merge_concatenated_json(raw: str) -> dict[str, Any] | None:
     """Try to parse concatenated JSON objects and merge into one dict.
 
     Models like qwen concatenate multiple JSON objects when they want to
-    batch calls: ``{"id":"a~1"}{"id":"b~2"}``.  This splits them apart
+    batch calls: ``{"id":"a›1"}{"id":"b›2"}``.  This splits them apart
     and merges: string values with the same key are joined with commas,
-    giving ``{"id": "a~1,b~2"}``.  Returns None if splitting fails.
+    giving ``{"id": "a›1,b›2"}``.  Returns None if splitting fails.
     """
     decoder = json.JSONDecoder()
     objects: list[dict[str, Any]] = []
